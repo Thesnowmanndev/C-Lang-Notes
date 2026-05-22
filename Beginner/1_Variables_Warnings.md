@@ -1,5 +1,13 @@
 # Variable Warnings
 
+- [Variable Warnings](#variable-warnings)
+  - [About these warnings](#about-these-warnings)
+  - [Declaring \& Initializing Variables](#declaring--initializing-variables)
+    - [⚠️ Warning - Hiding Declarations ⚠️](#️-warning---hiding-declarations-️)
+    - [⚠️ Warning - Declaration Scope ⚠️](#️-warning---declaration-scope-️)
+    - [⚠️ Warning - Multiple Declarations ⚠️](#️-warning---multiple-declarations-️)
+    - [⚠️ Warning - Use Floats Properly ⚠️](#️-warning---use-floats-properly-️)
+
 ## About these warnings
 
 These warnings are derived from the JOINT STRIKE FIGHTER AIR VEHICLE C++ CODING STANDARDS FOR THE SYSTEM DEVELOPMENT AND DEMONSTRATION PROGRAM document Revision C dated December 2005. 

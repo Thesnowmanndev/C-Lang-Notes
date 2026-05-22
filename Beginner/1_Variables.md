@@ -1,5 +1,16 @@
 # Variables in C
 
+- [Variables in C](#variables-in-c)
+  - [What is a Variable?](#what-is-a-variable)
+  - [Declaring \& Initializing Variables](#declaring--initializing-variables)
+  - [The Basic Data Types](#the-basic-data-types)
+  - [Format Specifiers (Printing Variables)](#format-specifiers-printing-variables)
+  - [Naming Rules \& Conventions](#naming-rules--conventions)
+  - [`const` — Making a Variable Unchangeable](#const--making-a-variable-unchangeable)
+  - [How Variables Live in Memory](#how-variables-live-in-memory)
+  - [Common Beginner Mistakes](#common-beginner-mistakes)
+  - [Quick Reference Summary](#quick-reference-summary)
+
 ## What is a Variable?
 
 A variable is a **named storage location in memory** that holds a value. In C, you must tell the compiler **what type of data** the box will hold before you can use it.
