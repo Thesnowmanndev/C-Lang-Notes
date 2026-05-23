@@ -1,5 +1,26 @@
 # Standard Library Header `<stdio.h>` in C
 
+- [Standard Library Header `<stdio.h>` in C](#standard-library-header-stdioh-in-c)
+  - [What is `<stdio.h>`?](#what-is-stdioh)
+  - [Output Functions](#output-functions)
+    - [`printf()` -- Print Formatted Output](#printf----print-formatted-output)
+    - [`puts()` -- Print a String](#puts----print-a-string)
+    - [`putchar()` -- Print a Single Character](#putchar----print-a-single-character)
+  - [Input Functions](#input-functions)
+    - [`scanf()` -- Read Formatted Input](#scanf----read-formatted-input)
+    - [`gets()` -- Read a Full Line (Deprecated)](#gets----read-a-full-line-deprecated)
+    - [`fgets()` -- Read a Full Line Safely](#fgets----read-a-full-line-safely)
+    - [`getchar()` -- Read a Single Character](#getchar----read-a-single-character)
+  - [File Functions](#file-functions)
+    - [Opening and Closing Files](#opening-and-closing-files)
+    - [`fprintf()` -- Write to a File](#fprintf----write-to-a-file)
+    - [`fscanf()` -- Read from a File](#fscanf----read-from-a-file)
+    - [`fgets()` with Files -- Read a Line from a File](#fgets-with-files----read-a-line-from-a-file)
+  - [Format Specifier Quick Reference](#format-specifier-quick-reference)
+    - [Formatting Numbers in `printf()`](#formatting-numbers-in-printf)
+  - [Putting It All Together -- Full Example](#putting-it-all-together----full-example)
+  - [Quick Reference Summary](#quick-reference-summary)
+
 ## What is `<stdio.h>`?
 
 `<stdio.h>` stands for **Standard Input/Output Header**. It is the most commonly included header file in C and the one you will put at the top of nearly every program you write. It gives your program access to functions that handle input and output operations, meaning reading data in and printing data out, whether that is to the screen, the keyboard, or a file.
