@@ -29,6 +29,41 @@
   - [The Full Flow Summarized](#the-full-flow-summarized)
   - [Why This Matters to You as a C Programmer](#why-this-matters-to-you-as-a-c-programmer)
   - [Implementation Flow \& State Machine Quick Reference Summary](#implementation-flow--state-machine-quick-reference-summary)
+  - [Security Vulnerabilities With `printf()`](#security-vulnerabilities-with-printf)
+  - [Why `printf()` Can Be Dangerous](#why-printf-can-be-dangerous)
+  - [Format String Attack -- The Most Critical Vulnerability](#format-string-attack----the-most-critical-vulnerability)
+    - [What is a Format String Attack](#what-is-a-format-string-attack)
+    - [The Vulnerable Pattern](#the-vulnerable-pattern)
+    - [What an Attacker Can Do With It](#what-an-attacker-can-do-with-it)
+    - [The Fix](#the-fix)
+  - [Buffer Overflow With `sprintf()`](#buffer-overflow-with-sprintf)
+    - [What is a Buffer Overflow](#what-is-a-buffer-overflow)
+    - [The Fix](#the-fix-1)
+  - [`%n` -- The Write Primitive](#n----the-write-primitive)
+    - [What is the Write Primitive](#what-is-the-write-primitive)
+    - [The Fix](#the-fix-2)
+  - [Integer Overflow With Width and Precision](#integer-overflow-with-width-and-precision)
+    - [What Is Integer Overflow](#what-is-integer-overflow)
+    - [The Fix](#the-fix-3)
+  - [Compiler Warnings and Defenses](#compiler-warnings-and-defenses)
+  - [Vulnerable vs Safe Patterns](#vulnerable-vs-safe-patterns)
+  - [Printf Security Vulnerabilities Quick Reference Summary](#printf-security-vulnerabilities-quick-reference-summary)
+  - [Practical Examples of `printf()` for Output, Logs, and Debugging in C](#practical-examples-of-printf-for-output-logs-and-debugging-in-c)
+  - [Formatted User-Facing Output](#formatted-user-facing-output)
+    - [Receipts and Invoices](#receipts-and-invoices)
+    - [Progress Indicators](#progress-indicators)
+    - [Displaying a Table of Data](#displaying-a-table-of-data)
+  - [Logging](#logging)
+    - [Basic Log Levels](#basic-log-levels)
+    - [Logging to a File](#logging-to-a-file)
+    - [Logging to `stderr`](#logging-to-stderr)
+  - [Debugging](#debugging)
+    - [Printing Variable State](#printing-variable-state)
+    - [The `__FILE__`, `__LINE__`, and `__func__` Macros](#the-__file__-__line__-and-__func__-macros)
+    - [Building a Reusable Debug Macro](#building-a-reusable-debug-macro)
+    - [Printing Memory in Hex (Memory Dump)](#printing-memory-in-hex-memory-dump)
+    - [Watching a Variable Change Over a Loop](#watching-a-variable-change-over-a-loop)
+  - [Practical Example Quick Reference Summary](#practical-example-quick-reference-summary)
 
 ## What is `printf()`?
 
@@ -905,3 +940,710 @@ You do not need to memorize the internals of `printf()` to use it well, but know
 - Only the type specifier is required -- everything else is optional
 - After processing an argument the loop resumes from where `fmt_ptr` left off
 - Mismatched types, missing arguments, and out-of-order specifier parts all make sense once you understand the state machine underneath
+
+## Security Vulnerabilities With `printf()`
+
+## Why `printf()` Can Be Dangerous
+
+`printf()` is one of the most used functions in C, which also makes it one of the most exploited. The vulnerabilities do not come from `printf()` itself being broken -- they come from programmers using it incorrectly. Because `printf()` was designed with a lot of trust in the caller, passing it the wrong input can give an attacker significant control over your program. These are real-world vulnerabilities that have been exploited in production software.
+
+## Format String Attack -- The Most Critical Vulnerability
+
+### What is a Format String Attack
+
+A format string attack happens when **user-supplied input is passed directly as the format string argument** to `printf()` instead of as a value argument. This is the most serious `printf()` vulnerability and the one every C programmer needs to understand deeply.
+
+### The Vulnerable Pattern
+
+```c
+char input[100];
+fgets(input, 100, stdin);
+printf(input);           // Extremely dangerous
+```
+
+vs the safe version:
+
+```c
+char input[100];
+fgets(input, 100, stdin);
+printf("%s", input);     // Safe -- input is treated as a value, not a format string
+```
+
+The difference is one argument. In the first version `printf()` treats whatever the user typed as a format string and runs it through the state machine parser. In the second version `printf()` is given a hardcoded format string `"%s"` and treats the user input only as a string value to print.
+
+### What an Attacker Can Do With It
+
+If a user can control the format string, they can feed `printf()` format specifiers and the state machine will faithfully process them. This opens up several levels of attack:
+
+**Level 1 -- Reading the Stack**
+
+Every format specifier that expects an argument will pull the next value off the call stack even if no argument was actually passed. An attacker can type format specifiers as input and read raw memory values off the stack.
+
+```c
+// Attacker types: %x %x %x %x %x
+// printf() happily reads 5 values off the stack and prints them in hex
+printf(attacker_input);
+// Output might be: a0b1c2d3 00000000 7fff4a2b 0804a012 deadbeef
+```
+
+Each `%x` pulls 4 bytes off the stack and prints them. With enough of these an attacker can read sensitive data out of memory -- passwords, encryption keys, memory addresses -- all without writing a single line of exploit code beyond the input string itself.
+
+**Level 2 -- Crashing the Program**
+
+An attacker can use `%s` to make `printf()` treat a stack value as a pointer to a string and try to read from that address. Since the stack values are essentially random memory addresses, this will almost certainly cause a segmentation fault and crash the program.
+
+```c
+// Attacker types: %s%s%s%s
+// printf() treats stack garbage as string pointers and tries to dereference them
+// Result: almost guaranteed crash
+```
+
+**Level 3 -- Writing to Arbitrary Memory Addresses**
+
+This is the most severe level. The `%n` specifier writes the number of characters printed so far into the address pointed to by its argument. Combined with format string injection, an attacker can craft an input string that writes a specific value to a specific memory address.
+
+```c
+// Attacker crafts input to place a target address on the stack
+// then uses %n to write into that address
+// This can overwrite return addresses, function pointers, or security flags
+```
+
+This technique can be used to redirect program execution to attacker-controlled code, which is full remote code execution. This class of vulnerability has received CVE designations and has been exploited in real deployed software.
+
+### The Fix
+
+The rule is absolute and has no exceptions:
+
+```c
+// Never do this
+printf(user_input);
+fprintf(file, user_input);
+sprintf(buffer, user_input);
+
+// Always do this
+printf("%s", user_input);
+fprintf(file, "%s", user_input);
+snprintf(buffer, size, "%s", user_input);
+```
+
+User input must always be passed as an argument, never as the format string itself. Modern compilers like GCC will warn you about this with `-Wall`:
+
+```
+warning: format not a string literal and no format arguments [-Wformat-security]
+```
+
+Never ignore this warning.
+
+## Buffer Overflow With `sprintf()`
+
+### What is a Buffer Overflow
+
+`sprintf()` is a variant of `printf()` that writes its output into a character buffer instead of the screen. It has no awareness of how large the destination buffer is, which means it will happily write past the end of it.
+
+```c
+char buffer[10];
+sprintf(buffer, "%s", "This string is way too long for the buffer");
+// Writes 43 characters into a 10-character buffer
+// Overflows into adjacent memory
+```
+
+A buffer overflow corrupts whatever happens to live in memory after the buffer. In the best case this crashes the program. In the worst case an attacker can craft the overflow to overwrite the return address on the stack and redirect execution to their own code.
+
+### The Fix
+
+Always use `snprintf()` instead of `sprintf()`. It takes a size argument and will never write more than that many characters:
+
+```c
+char buffer[10];
+snprintf(buffer, sizeof(buffer), "%s", "This string is way too long");
+// Safely writes at most 9 characters + null terminator
+// Output in buffer: "This stri"
+```
+
+The size argument should always be `sizeof(buffer)` rather than a hardcoded number so it stays correct if the buffer size ever changes.
+
+## `%n` -- The Write Primitive
+
+### What is the Write Primitive
+
+`%n` was covered in the TYPE writeup as a specifier that stores the character count into a pointer argument. In the context of security it deserves its own discussion because it is the primitive that turns a format string vulnerability from a read-only information leak into a full write primitive.
+
+```c
+int count;
+printf("Hello %n World", &count);   // Writes 6 into count
+```
+
+When combined with a format string injection attack, an attacker who controls the format string can control what gets written and where. The technique involves padding output to a precise length using width specifiers and then triggering `%n` to write that exact value to a chosen address.
+
+### The Fix
+
+If your program does not explicitly use `%n`, disable it. On Windows with MSVC it is already disabled by default. On GCC/Linux you can define `_FORTIFY_SOURCE` to add runtime checks:
+
+```c
+#define _FORTIFY_SOURCE 2
+```
+
+Many security-conscious codebases simply audit for any use of `%n` and forbid it entirely through code review policy.
+
+## Integer Overflow With Width and Precision
+
+### What Is Integer Overflow
+
+An attacker who controls width or precision values in a format specifier can pass extremely large numbers, potentially causing integer overflow inside `printf()` internals or causing it to allocate an unexpectedly large amount of stack space for formatting.
+
+```c
+// If width comes from user input
+int width = get_user_width();
+printf("%*d\n", width, 42);   // What if width is INT_MAX?
+```
+
+This is a less commonly exploited vector but worth knowing about in contexts where format string components are dynamically generated from user input.
+
+### The Fix
+
+Always validate and clamp width and precision values before using them in format strings. Never pass raw user-controlled integers as width arguments via `*`.
+
+## Compiler Warnings and Defenses
+
+Modern compilers and tools have built-in defenses against these vulnerabilities. Knowing them is part of writing safe C:
+
+| Defense | What It Does |
+|---------|-------------|
+| `-Wall -Wformat-security` | GCC warns when format string is not a string literal |
+| `-D_FORTIFY_SOURCE=2` | Adds runtime checks for `printf()` family calls |
+| `snprintf()` over `sprintf()` | Prevents buffer overflows by enforcing a size limit |
+| Static analyzers (Clang, Coverity) | Detect format string mismatches at compile time |
+| ASLR (OS level) | Randomizes memory layout making address prediction harder |
+| Stack canaries | Detect stack corruption before a return address is used |
+
+## Vulnerable vs Safe Patterns
+
+```c
+// VULNERABLE -- user input as format string
+printf(input);
+fprintf(fp, input);
+sprintf(buf, input);
+
+// SAFE -- user input as value argument
+printf("%s", input);
+fprintf(fp, "%s", input);
+snprintf(buf, sizeof(buf), "%s", input);
+
+// VULNERABLE -- sprintf with no size limit
+char buf[64];
+sprintf(buf, "%s", potentially_long_string);
+
+// SAFE -- snprintf with explicit size
+char buf[64];
+snprintf(buf, sizeof(buf), "%s", potentially_long_string);
+
+// RISKY -- dynamic width from user input
+printf("%*d", user_width, value);
+
+// SAFE -- validated width
+if (user_width > 0 && user_width < 64) {
+    printf("%*d", user_width, value);
+}
+```
+
+## Printf Security Vulnerabilities Quick Reference Summary
+
+- Never pass user input directly as the format string -- always use `"%s"` and pass input as an argument
+- A format string attack lets an attacker read stack memory, crash the program, or write to arbitrary memory addresses using nothing but crafted input
+- `%n` is the specifier that enables memory writes and should be avoided or disabled
+- Replace every use of `sprintf()` with `snprintf()` and always pass `sizeof(buffer)` as the size
+- Enable compiler warnings with `-Wall -Wformat-security` and never ignore format string warnings
+- Dynamic width values from user input should always be validated before use
+- These are not theoretical -- format string vulnerabilities have real CVEs and have been exploited in production systemsThere's the writeup and the markdown file. This is genuinely important material -- format string vulnerabilities are not beginner-level threats, they are the kind of bugs that have made it into shipping software and received CVE numbers. 
+
+## Practical Examples of `printf()` for Output, Logs, and Debugging in C
+
+## Formatted User-Facing Output
+
+### Receipts and Invoices
+
+One of the most common real-world uses of `printf()` formatting is building clean tabular output that a user will actually read.
+
+```c
+#include <stdio.h>
+
+int main() {
+    printf("========================================\n");
+    printf("%-20s %8s %10s\n", "Item", "Qty", "Price");
+    printf("========================================\n");
+    printf("%-20s %8d %10.2f\n", "Coffee",        2,  5.98);
+    printf("%-20s %8d %10.2f\n", "Sandwich",       1,  6.49);
+    printf("%-20s %8d %10.2f\n", "Orange Juice",   3,  8.97);
+    printf("%-20s %8d %10.2f\n", "Water Bottle",   1,  1.25);
+    printf("========================================\n");
+    printf("%-20s %8s %10.2f\n", "TOTAL", "", 22.69);
+    printf("========================================\n");
+
+    return 0;
+}
+```
+
+**Output:**
+```
+========================================
+Item                      Qty      Price
+========================================
+Coffee                      2       5.98
+Sandwich                    1       6.49
+Orange Juice                3       8.97
+Water Bottle                1       1.25
+========================================
+TOTAL                              22.69
+========================================
+```
+
+### Progress Indicators
+
+```c
+#include <stdio.h>
+
+void print_progress(int current, int total) {
+    float percent = (float)current / total * 100;
+    int filled = (int)(percent / 5);   // 20 segments total
+
+    printf("\r[");
+    for (int i = 0; i < 20; i++) {
+        printf("%c", i < filled ? '#' : '-');
+    }
+    printf("] %5.1f%% (%d/%d)", percent, current, total);
+    fflush(stdout);   // Force output without newline
+}
+
+int main() {
+    int total = 50;
+    for (int i = 0; i <= total; i++) {
+        print_progress(i, total);
+        // Simulate work here
+    }
+    printf("\nDone!\n");
+
+    return 0;
+}
+```
+
+**Output (updates in place):**
+```
+[####################] 100.0% (50/50)
+Done!
+```
+
+> `\r` moves the cursor back to the start of the current line without a newline, allowing the progress bar to overwrite itself. `fflush(stdout)` forces the output to appear immediately since `printf()` buffers output by default.
+
+### Displaying a Table of Data
+
+```c
+#include <stdio.h>
+
+typedef struct {
+    char name[20];
+    int age;
+    float gpa;
+} Student;
+
+int main() {
+    Student students[] = {
+        {"Alice",   20, 3.92},
+        {"Bob",     22, 3.45},
+        {"Charlie", 21, 3.78},
+        {"Diana",   23, 3.99}
+    };
+
+    int count = 4;
+
+    printf("+---------------------+-----+-------+\n");
+    printf("| %-19s | %3s | %5s |\n", "Name", "Age", "GPA");
+    printf("+---------------------+-----+-------+\n");
+
+    for (int i = 0; i < count; i++) {
+        printf("| %-19s | %3d | %5.2f |\n",
+               students[i].name,
+               students[i].age,
+               students[i].gpa);
+    }
+
+    printf("+---------------------+-----+-------+\n");
+
+    return 0;
+}
+```
+
+**Output:**
+```
++---------------------+-----+-------+
+| Name                | Age |   GPA |
++---------------------+-----+-------+
+| Alice               |  20 |  3.92 |
+| Bob                 |  22 |  3.45 |
+| Charlie             |  21 |  3.78 |
+| Diana               |  23 |  3.99 |
++---------------------+-----+-------+
+```
+
+## Logging
+
+### Basic Log Levels
+
+Real applications use log levels to categorize messages by severity. You can build a simple but effective logging system entirely with `printf()`.
+
+```c
+#include <stdio.h>
+#include <time.h>
+
+typedef enum {
+    LOG_INFO,
+    LOG_WARNING,
+    LOG_ERROR
+} LogLevel;
+
+void log_message(LogLevel level, const char *message) {
+    const char *labels[] = { "INFO   ", "WARNING", "ERROR  " };
+
+    time_t now = time(NULL);
+    struct tm *t = localtime(&now);
+
+    printf("[%04d-%02d-%02d %02d:%02d:%02d] [%s] %s\n",
+           t->tm_year + 1900,
+           t->tm_mon  + 1,
+           t->tm_mday,
+           t->tm_hour,
+           t->tm_min,
+           t->tm_sec,
+           labels[level],
+           message);
+}
+
+int main() {
+    log_message(LOG_INFO,    "Server started on port 8080");
+    log_message(LOG_WARNING, "Memory usage above 80%%");
+    log_message(LOG_ERROR,   "Failed to connect to database");
+
+    return 0;
+}
+```
+
+**Output:**
+```
+[2026-05-23 14:32:01] [INFO   ] Server started on port 8080
+[2026-05-23 14:32:01] [WARNING] Memory usage above 80%
+[2026-05-23 14:32:01] [ERROR  ] Failed to connect to database
+```
+
+### Logging to a File
+
+Swapping `printf()` for `fprintf()` redirects your log output to a file instead of the screen. A real logging setup typically writes to both:
+
+```c
+#include <stdio.h>
+#include <time.h>
+
+void log_to_file(const char *filename, const char *level, const char *message) {
+    FILE *fptr = fopen(filename, "a");   // Append mode -- never overwrites
+
+    if (fptr == NULL) {
+        printf("ERROR: Could not open log file.\n");
+        return;
+    }
+
+    time_t now = time(NULL);
+    struct tm *t = localtime(&now);
+
+    fprintf(fptr, "[%04d-%02d-%02d %02d:%02d:%02d] [%s] %s\n",
+            t->tm_year + 1900,
+            t->tm_mon  + 1,
+            t->tm_mday,
+            t->tm_hour,
+            t->tm_min,
+            t->tm_sec,
+            level,
+            message);
+
+    // Also print to screen
+    printf("[%s] %s\n", level, message);
+
+    fclose(fptr);
+}
+
+int main() {
+    log_to_file("app.log", "INFO",    "Application started");
+    log_to_file("app.log", "WARNING", "Config file not found, using defaults");
+    log_to_file("app.log", "ERROR",   "Disk write failed");
+
+    return 0;
+}
+```
+
+### Logging to `stderr`
+
+For errors specifically, it is better practice to write to `stderr` rather than `stdout`. This keeps error output separate from normal program output and allows them to be redirected independently on the command line.
+
+```c
+#include <stdio.h>
+
+int main() {
+    int result = -1;   // Simulate a failed operation
+
+    printf("Program running...\n");   // Goes to stdout
+
+    if (result < 0) {
+        fprintf(stderr, "ERROR: Operation failed with code %d\n", result);
+    }
+
+    return 0;
+}
+```
+
+Running the program with output redirection:
+```
+./program > output.txt       // stdout goes to file, stderr still prints to screen
+./program 2> errors.txt      // stderr goes to file, stdout still prints to screen
+./program > out.txt 2> err.txt  // both redirected separately
+```
+
+## Debugging
+
+### Printing Variable State
+
+The most fundamental debugging technique in C is printing variable values at key points in your program to verify they contain what you expect.
+
+```c
+#include <stdio.h>
+
+int calculate_total(int price, int quantity, float tax_rate) {
+    printf("[DEBUG] calculate_total called: price=%d, quantity=%d, tax=%.2f\n",
+           price, quantity, tax_rate);
+
+    int subtotal = price * quantity;
+    printf("[DEBUG] subtotal = %d\n", subtotal);
+
+    float tax = subtotal * tax_rate;
+    printf("[DEBUG] tax = %.2f\n", tax);
+
+    int total = subtotal + (int)tax;
+    printf("[DEBUG] total = %d\n", total);
+
+    return total;
+}
+
+int main() {
+    int result = calculate_total(10, 5, 0.08);
+    printf("Final total: %d\n", result);
+
+    return 0;
+}
+```
+
+**Output:**
+```
+[DEBUG] calculate_total called: price=10, quantity=5, tax=0.08
+[DEBUG] subtotal = 50
+[DEBUG] tax = 4.00
+[DEBUG] total = 54
+Final total: 54
+```
+
+### The `__FILE__`, `__LINE__`, and `__func__` Macros
+
+C provides built-in macros that tell you exactly where in your source code a `printf()` call is located. These are invaluable for tracking down bugs in larger programs.
+
+| Macro | What It Contains |
+|-------|-----------------|
+| `__FILE__` | Name of the current source file as a string |
+| `__LINE__` | Current line number as an integer |
+| `__func__` | Name of the current function as a string |
+
+```c
+#include <stdio.h>
+
+void process_data(int value) {
+    printf("[%s:%d in %s()] Processing value: %d\n",
+           __FILE__, __LINE__, __func__, value);
+
+    if (value < 0) {
+        printf("[%s:%d in %s()] WARNING: Negative value received\n",
+               __FILE__, __LINE__, __func__);
+    }
+}
+
+int main() {
+    process_data(42);
+    process_data(-7);
+
+    return 0;
+}
+```
+
+**Output:**
+```
+[main.c:5 in process_data()] Processing value: 42
+[main.c:5 in process_data()] Processing value: -7
+[main.c:9 in process_data()] WARNING: Negative value received
+```
+
+### Building a Reusable Debug Macro
+
+Rather than sprinkling `printf("[DEBUG]...")` calls everywhere and then having to remove them all before release, you can build a debug macro that compiles away to nothing in production builds.
+
+```c
+#include <stdio.h>
+
+// Define DEBUG_MODE during development
+// Comment it out or remove it for production builds
+#define DEBUG_MODE
+
+#ifdef DEBUG_MODE
+    #define DEBUG(fmt, ...) \
+        printf("[DEBUG] [%s:%d] " fmt "\n", __FILE__, __LINE__, ##__VA_ARGS__)
+#else
+    #define DEBUG(fmt, ...)   // Expands to nothing in production
+#endif
+
+int divide(int a, int b) {
+    DEBUG("divide called with a=%d, b=%d", a, b);
+
+    if (b == 0) {
+        DEBUG("Division by zero caught");
+        return -1;
+    }
+
+    int result = a / b;
+    DEBUG("Result: %d", result);
+    return result;
+}
+
+int main() {
+    int r1 = divide(10, 2);
+    int r2 = divide(10, 0);
+
+    printf("r1 = %d\n", r1);
+    printf("r2 = %d\n", r2);
+
+    return 0;
+}
+```
+
+**Output with `DEBUG_MODE` defined:**
+```
+[DEBUG] [main.c:18] divide called with a=10, b=2
+[DEBUG] [main.c:23] Result: 5
+[DEBUG] [main.c:18] divide called with a=10, b=0
+[DEBUG] [main.c:21] Division by zero caught
+r1 = 5
+r2 = -1
+```
+
+**Output without `DEBUG_MODE` defined:**
+```
+r1 = 5
+r2 = -1
+```
+
+> `##__VA_ARGS__` is a GCC extension that handles the case where no additional arguments are passed to the macro beyond the format string. The `##` swallows the trailing comma if the argument list is empty, preventing a compile error.
+
+### Printing Memory in Hex (Memory Dump)
+
+When debugging low-level problems involving raw memory, pointer arithmetic, or binary data, printing memory as hex bytes is essential. This is the same format used by professional debuggers.
+
+```c
+#include <stdio.h>
+
+void hex_dump(const void *ptr, int bytes) {
+    const unsigned char *p = (const unsigned char *)ptr;
+
+    for (int i = 0; i < bytes; i++) {
+        if (i % 16 == 0) {
+            printf("\n%04x  ", i);   // Print offset at start of each row
+        }
+        printf("%02x ", p[i]);       // Print each byte as 2-digit hex
+    }
+    printf("\n");
+}
+
+int main() {
+    int values[] = {1, 2, 3, 255, 256, 65535};
+
+    printf("Hex dump of values array:");
+    hex_dump(values, sizeof(values));
+
+    char message[] = "Hello";
+    printf("\nHex dump of \"Hello\":");
+    hex_dump(message, sizeof(message));
+
+    return 0;
+}
+```
+
+**Output:**
+```
+Hex dump of values array:
+0000  01 00 00 00 02 00 00 00 03 00 00 00 ff 00 00 00
+0010  00 01 00 00 ff ff 00 00
+
+Hex dump of "Hello":
+0000  48 65 6c 6c 6f 00
+```
+
+> The `%02x` specifier is key here -- `02` pads with leading zeros to always print exactly 2 hex digits, and `x` prints as lowercase hexadecimal. This matches the output format of tools like `xxd` and `gdb`'s `x` command.
+
+### Watching a Variable Change Over a Loop
+
+When debugging loops, printing the variable state at each iteration helps spot exactly where a value goes wrong.
+
+```c
+#include <stdio.h>
+
+int main() {
+    int arr[] = {4, 2, 7, 1, 9, 3};
+    int n = 6;
+
+    printf("%-6s %-6s %-30s\n", "Pass", "Swap", "Array State");
+    printf("----------------------------------------------\n");
+
+    for (int i = 0; i < n - 1; i++) {
+        int swapped = 0;
+        for (int j = 0; j < n - i - 1; j++) {
+            if (arr[j] > arr[j + 1]) {
+                int temp = arr[j];
+                arr[j] = arr[j + 1];
+                arr[j + 1] = temp;
+                swapped++;
+            }
+        }
+
+        // Print state after each pass
+        printf("%-6d %-6d ", i + 1, swapped);
+        for (int k = 0; k < n; k++) {
+            printf("%d ", arr[k]);
+        }
+        printf("\n");
+    }
+
+    return 0;
+}
+```
+
+**Output:**
+```
+Pass   Swap   Array State
+----------------------------------------------
+1      3      2 4 1 7 3 9
+2      3      2 1 4 3 7 9
+3      2      1 2 3 4 7 9
+4      0      1 2 3 4 7 9
+5      0      1 2 3 4 7 9
+```
+
+## Practical Example Quick Reference Summary
+
+- Use `%-Ns` for left-aligned text columns and `%Nd` or `%N.2f` for right-aligned number columns to build clean tabular output
+- `\r` combined with `fflush(stdout)` enables in-place updating output like progress bars
+- Use `fprintf(stderr, ...)` for error messages to keep them separate from normal output
+- The `__FILE__`, `__LINE__`, and `__func__` macros give you precise location information in debug output at no runtime cost
+- Wrap debug `printf()` calls in a macro gated by `#ifdef DEBUG_MODE` so they compile away completely in production builds
+- `%02x` is the standard specifier for printing individual bytes in hex dump style output
+- Print variable state at loop boundaries and function entry points to isolate exactly where values go wrong
+- `fflush(stdout)` forces buffered output to appear immediately, which matters for progress indicators and real-time loggingThere's the writeup and the markdown file. A few things in here worth paying extra attention to when you get to your solo phase -- the reusable debug macro with `#ifdef DEBUG_MODE` is something professional C programmers use constantly, and the `__FILE__`/`__LINE__`/`__func__` macros will save you a lot of head-scratching when tracking down bugs in bigger programs.
