@@ -13,7 +13,7 @@ This is a repository for me to keep my notes for the C programming language. Hop
 - [X] [Standard Library Header - Input/Output](Beginner/4_Standard_Library_Header_Input_Output.md)
 - [X] [Standard Library Header - String](Beginner/5_Standard_Library_Header_String.md)
 - [X] [printf() functionality indepth](Beginner/6_Printf_Indepth.md)
-- [ ] Math functions
+- [X] [Standard Library Header - Common Mathmatics Functions](Beginner/7_Standard_Library_Header_Math.md)
 - [ ] if statements
 - [ ] switches
 - [ ] nested if statements
@@ -59,7 +59,6 @@ This is a repository for me to keep my notes for the C programming language. Hop
 - [ ] Standard Library Header - Alternative Operator Spellings (iso646)
 - [ ] Standard Library Header - Ranges of Integer Types (limits)
 - [ ] Standard Library Header - Localization Utilities (locale)
-- [ ] Standard Library Header - Common Mathmatics Functions (math)
 - [ ] Standard Library Header - Variable Arguments (stdarg)
 - [ ] Standard Library Header - Byte & Bit Macros (stdbit)
 - [ ] Standard Library Header - Boolean Macros (stdbool)
