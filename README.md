@@ -14,7 +14,7 @@ This is a repository for me to keep my notes for the C programming language. Hop
 - [X] [Standard Library Header - String](Beginner/5_Standard_Library_Header_String.md)
 - [X] [printf() functionality indepth](Beginner/6_Printf_Indepth.md)
 - [X] [Standard Library Header - Common Mathmatics Functions](Beginner/7_Standard_Library_Header_Math.md)
-- [ ] if statements
+- [X] [if statements](Beginner/8_if_statements.md)
 - [ ] switches
 - [ ] nested if statements
 - [ ] logical operators
